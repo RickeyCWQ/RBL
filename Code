@@ -1,0 +1,1998 @@
+算法主程序
+
+%match
+
+% num = match(image1, image2)
+
+%
+
+% This function reads two images, finds their SIFT features, and
+
+%   displays lines connecting the
+matched keypoints.  A match is accepted
+
+%   only if its distance is less than
+distRatio times the distance to the
+
+%   second closest match.
+
+% It returns the number of matches displayed.
+
+%
+
+% Example: match('scene.pgm','book.pgm');
+
+ 
+
+function num = match(image1, image2)
+
+% Find SIFT keypoints for each image
+
+[im1, des1, loc1] = sift(image1);
+
+[im2, des2, loc2] = sift(image2);
+
+ 
+
+% For efficiency in Matlab, it is cheaper to compute dot products between
+%  unit vectors rather than Euclidean distances.  Note that the ratio of 
+%  angles (acos of dot products of unit vectors) is a close approximation
+%  to the ratio of Euclidean distances for small angles.
+% distRatio: Only keep matches in which the ratio of vector angles from the
+
+% nearest to second nearest neighbor is less than distRatio.
+
+distRatio = 0.6;   
+
+ 
+
+% For each descriptor in the first image, select its match to second image.
+
+des2t = des2';                         
+% Precompute matrix transpose
+
+for i = 1 : size(des1,1)
+
+   dotprods = des1(i,:) * des2t;        % Computes vector of dot products
+
+   [vals,indx] = sort(acos(dotprods));  % Take inverse cosine and sort results
+
+ 
+
+   % Check if nearest neighbor has
+angle less than distRatio times 2nd.
+
+   if (vals(1) < distRatio *
+vals(2))
+
+      match(i) = indx(1);
+
+   else
+
+      match(i) = 0;
+
+   end
+
+end
+
+ 
+
+% Create a new image showing the two images side by side.
+
+im3 = appendimages(im1,im2);
+
+ 
+
+% Show a figure with lines joining the accepted matches.
+
+figure('Position', [100 100 size(im3,2) size(im3,1)]);
+
+colormap('gray');
+
+imagesc(im3);
+
+hold on;
+
+cols1 = size(im1,2);
+
+for i = 1: size(des1,1)
+
+  if (match(i) > 0)
+
+    line([loc1(i,2)
+loc2(match(i),2)+cols1], ... [loc1(i,1)
+loc2(match(i),1)], 'Color', 'c');
+
+  end
+
+end
+
+hold off;
+
+num = sum(match > 0);
+
+fprintf('Found %d matches.\n', num);
+
+ 
+
+ 
+
+
+%sift
+% [image, descriptors, locs] = sift(imageFile)
+% This function reads an image and returns its SIFT keypoints.
+% Input parameters:
+% imageFile: the file name for the image.
+% Returned:
+% image: the image array in double format
+% descriptors: a K-by-128 matrix, where each row gives an invariant
+% descriptor for one of the K keypoints.  The descriptor is a vector 
+% of 128 values normalized to unit length.
+% locs: K-by-4 matrix, in which each row has the 4 values for a
+% keypoint location (row,column, scale, orientation).  The 
+% orientation is in the range [-PI, PI] radians.
+ 
+
+function [image, descriptors, locs] = sift(imageFile)
+
+ 
+
+% Load image
+
+image = imread(imageFile);
+
+ 
+
+% If you have the Image Processing Toolbox, you can uncomment the following
+% lines to allow input of color images, which will be converted to grayscale.
+% if isrgb(image)
+%    image = rgb2gray(image);
+% end
+
+ 
+
+[rows, cols] = size(image); 
+
+ 
+
+% Convert into PGM imagefile, readable by "keypoints" executable
+
+f = fopen('tmp.pgm', 'w');
+
+if f == -1
+
+    error('Could not create file
+tmp.pgm.');
+
+end
+
+fprintf(f, 'P5\n%d\n%d\n255\n', cols, rows);
+
+fwrite(f, image', 'uint8');
+
+fclose(f);
+
+ 
+
+% Call keypoints executable
+
+if isunix
+
+    command = '!./sift ';
+
+else
+
+    command = '!siftWin32 ';
+
+end
+
+command = [command ' <tmp.pgm >tmp.key'];
+
+eval(command);
+
+ 
+
+% Open tmp.key and check its header
+
+g = fopen('/Users/rickeykimfair/Documents/RBL/siftDemoV4/tmp.key', 'r');
+
+if g == -1
+
+    error('Could not open file
+tmp.key.');
+
+end
+
+[header, count] = fscanf(g, '%d %d', [1 2]);
+
+if count ~= 2
+
+    error('Invalid keypoint file
+beginning.');
+
+end
+
+num = header(1);
+
+len = header(2);
+
+if len ~= 128
+
+    error('Keypoint descriptor length
+invalid (should be 128).');
+
+end
+
+ 
+
+% Creates the two output matrices (use known size for efficiency)
+
+locs = double(zeros(num, 4));
+
+descriptors = double(zeros(num, 128));
+
+ 
+
+% Parse tmp.key
+
+for i = 1:num
+
+    [vector, count] = fscanf(g, '%f
+%f %f %f', [1 4]); %row col scale ori
+
+    if count ~= 4
+
+        error('Invalid keypoint file
+format');
+
+    end
+
+    locs(i, :) = vector(1, :);
+
+    
+
+    [descrip, count] = fscanf(g,
+'%d', [1 len]);
+
+    if (count ~= 128)
+
+        error('Invalid keypoint file
+value.');
+
+    end
+
+    % Normalize each input vector to
+unit length
+
+    descrip = descrip /
+sqrt(sum(descrip.^2));
+
+    descriptors(i, :) = descrip(1,
+:);
+
+end
+
+fclose(g);
+
+ 
+
+ 
+
+%showkeys
+
+% showkeys(image, locs)
+
+%
+
+% This function displays an image with SIFT keypoints overlayed.
+
+%   Input parameters:
+
+%     image: the file name for the
+image (grayscale)
+
+%     locs: matrix in which each row
+gives a keypoint location (row,
+
+%           column, scale,
+orientation)
+
+ 
+
+function showkeys(image, locs)
+
+ 
+
+disp('Drawing SIFT keypoints ...');
+
+ 
+
+% Draw image with keypoints
+
+figure('Position', [50 50 size(image,2) size(image,1)]);
+
+colormap('gray');
+
+imagesc(image);
+
+hold on;
+
+imsize = size(image);
+
+for i = 1: size(locs,1)
+
+    % Draw an arrow, each line
+transformed according to keypoint parameters.
+
+    TransformLine(imsize, locs(i,:),
+0.0, 0.0, 1.0, 0.0);
+
+    TransformLine(imsize, locs(i,:),
+0.85, 0.1, 1.0, 0.0);
+
+    TransformLine(imsize, locs(i,:),
+0.85, -0.1, 1.0, 0.0);
+
+end
+
+hold off;
+
+ 
+
+ 
+
+% ------ Subroutine: TransformLine -------
+
+% Draw the given line in the image, but first translate, rotate, and
+
+% scale according to the keypoint parameters.
+
+%
+
+% Parameters:
+
+%   Arrays:
+
+%    imsize = [rows columns] of image
+
+%    keypoint = [subpixel_row subpixel_column
+scale orientation]
+
+%
+
+%   Scalars:
+
+%    x1, y1; begining of vector
+
+%    x2, y2; ending of vector
+
+function TransformLine(imsize, keypoint, x1, y1, x2, y2)
+
+ 
+
+% The scaling of the unit length arrow is set to approximately the radius
+
+%   of the region used to compute the
+keypoint descriptor.
+
+len = 6 * keypoint(3);
+
+ 
+
+% Rotate the keypoints by 'ori' = keypoint(4)
+
+s = sin(keypoint(4));
+
+c = cos(keypoint(4));
+
+ 
+
+% Apply transform
+
+r1 = keypoint(1) - len * (c * y1 + s * x1);
+
+c1 = keypoint(2) + len * (- s * y1 + c * x1);
+
+r2 =     c * y2 + s * x2);
+
+c2 = keypoint(2) + len * (- s * y2 + c * x2);
+
+ 
+
+line([c1 c2], [r1 r2], 'Color', 'c');
+
+ 
+
+ 
+
+%ransac
+
+function [ theta,rho ] = ransac( pts,iterNum,thDist,thInlrRatio )
+
+%RANSAC Use RANdom SAmple Consensus to fit a line
+
+% RESCOEF =RANSAC(PTS,ITERNUM,THDIST,THINLRRATIO) PTS is 2*n matrix including x
+% n points, ITERNUM is the number of iteration, THDIST is the inlier 
+% distance threshold and ROUND(THINLRRATIO*SIZE(PTS,2)) is the inlier number threshold. The final 
+% fitted line is RHO = sin(THETA)*x+cos(THETA)*y.
+
+ 
+
+sampleNum = 2;
+
+ptNum = size(pts,2);
+
+thInlr = round(thInlrRatio*ptNum);
+
+inlrNum = zeros(1,iterNum);
+
+theta1 = zeros(1,iterNum);
+
+rho1 = zeros(1,iterNum);
+
+ 
+
+for p = 1:iterNum
+
+            % 1. fit using 2 random
+points
+
+            sampleIdx =
+randIndex(ptNum,sampleNum);
+
+            ptSample =
+pts(:,sampleIdx);
+
+            d =
+ptSample(:,2)-ptSample(:,1);
+
+            d = d/norm(d); % direction
+vector of the line
+
+            
+
+            % 2. count the inliers, if
+more than thInlr, refit; else iterate
+
+            n = [-d(2),d(1)]; % unit
+normal vector of the line
+
+            dist1 =
+n*(pts-repmat(ptSample(:,1),1,ptNum));
+
+            inlier1 = find(abs(dist1)
+< thDist);
+
+            inlrNum(p) =
+length(inlier1);
+
+            if length(inlier1) <
+thInlr, continue; end
+
+            ev =
+princomp(pts(:,inlier1)');
+
+            d1 = ev(:,1);
+
+            theta1(p) = -atan2(d1(2),d1(1));
+% save the coefs
+
+            rho1(p) =
+[-d1(2),d1(1)]*mean(pts(:,inlier1),2);
+
+end
+
+ 
+
+% 3. choose the coef with the most inliers
+
+[~,idx] = max(inlrNum);
+
+theta = theta1(idx);
+
+rho = rho1(idx);
+
+ 
+
+end
+
+ 
+
+%ransac1
+
+function [f inlierIdx] = ransac1( x,y,ransacCoef,funcFindF,funcDist )
+
+%[f inlierIdx] = ransac1( x,y,ransacCoef,funcFindF,funcDist )
+
+%         Use RANdom SAmple Consensus
+to find a fit from X to Y.
+
+%         X is M*n matrix including n
+points with dim M, Y is N*n;
+
+%         The fit, f, and the indices
+of inliers, are returned.
+
+%
+
+%         RANSACCOEF is a struct with
+following fields:
+
+%         minPtNum,iterNum,thDist,thInlrRatio
+
+%         MINPTNUM is the minimum
+number of points with whom can we 
+
+%         find a fit. For line
+fitting, it's 2. For homography, it's 4.
+
+%         ITERNUM is the number of
+iteration, THDIST is the inlier 
+
+%         distance threshold and
+ROUND(THINLRRATIO*n) is the inlier number threshold.
+
+%
+
+%         FUNCFINDF is a func handle,
+f1 = funcFindF(x1,y1)
+
+%         x1 is M*n1 and y1 is N*n1,
+n1 >= ransacCoef.minPtNum
+
+%         f1 can be of any type.
+
+%         FUNCDIST is a func handle, d
+= funcDist(f,x1,y1)
+
+%         It uses f returned by
+FUNCFINDF, and return the distance
+
+%         between f and the points, d
+is 1*n1.
+
+%         For line fitting, it should
+calculate the dist between the line and the
+
+%         points [x1;y1]; for
+homography, it should project x1 to y2 then
+
+%         calculate the dist between
+y1 and y2.
+
+%         Yan Ke @ THUEE, 20110123,
+xjed09@gmail.com
+
+ 
+
+ 
+
+minPtNum = ransacCoef.minPtNum;
+
+iterNum = ransacCoef.iterNum;
+
+thInlrRatio = ransacCoef.thInlrRatio;
+
+thDist = ransacCoef.thDist;
+
+ptNum = size(x,2);
+
+thInlr = round(thInlrRatio*ptNum);
+
+ 
+
+inlrNum = zeros(1,iterNum);
+
+fLib = cell(1,iterNum);
+
+ 
+
+for p = 1:iterNum
+
+            % 1. fit using  random points
+
+            sampleIdx =
+randIndex(ptNum,minPtNum);
+
+            f1 =
+funcFindF(x(:,sampleIdx),y(:,sampleIdx));
+
+            
+
+            % 2. count the inliers, if
+more than thInlr, refit; else iterate
+
+            dist = funcDist(f1,x,y);
+
+            inlier1 = find(dist <
+thDist);
+
+            inlrNum(p) =
+length(inlier1);
+
+            if length(inlier1) <
+thInlr, continue; end
+
+            fLib{p} =
+funcFindF(x(:,inlier1),y(:,inlier1));
+
+end
+
+ 
+
+% 3. choose the coef with the most inliers
+
+[~,idx] = max(inlrNum);
+
+f = fLib{idx};
+
+dist = funcDist(f,x,y);
+
+inlierIdx = find(dist < thDist);
+
+            
+
+end
+
+ 
+
+ 
+
+%%findhomography
+
+function [H corrPtIdx] = findHomography(pts1,pts2)
+
+% [H corrPtIdx] = findHomography(pts1,pts2)
+
+%         Find the homography between
+two planes using a set of corresponding
+
+%         points. PTS1 =
+[x1,x2,...;y1,y2,...]. RANSAC method is used.
+
+%         corrPtIdx is the indices of
+inliers.
+
+%         Yan Ke @ THUEE, 20110123,
+xjed09@gmail.com
+
+ 
+
+ 
+
+coef.minPtNum = 4;
+
+coef.iterNum = 30;
+
+coef.thDist = 4;
+
+coef.thInlrRatio = .1;
+
+[H corrPtIdx] = ransac1(pts1,pts2,coef,@solveHomo,@calcDist);
+
+ 
+
+end
+
+ 
+
+function d = calcDist(H,pts1,pts2)
+
+%         Project PTS1 to PTS3 using
+H, then calcultate the distances between
+
+%         PTS2 and PTS3
+
+ 
+
+n = size(pts1,2);
+
+pts3 = H*[pts1;ones(1,n)];
+
+pts3 = pts3(1:2,:)./repmat(pts3(3,:),2,1);
+
+d = sum((pts2-pts3).^2,1);
+
+ 
+
+end
+
+ 
+
+%%genransactest
+
+function [ pts ] = genRansacTestPoints( ptNum,outlrRatio,inlrStd,inlrCoef )
+
+%GENRANSACTESTPOINTS Generate the points used by RANSAC function
+
+%   PTS =
+GENRANSACTESTPOINTS(PTNUM,OUTLRRATIO,INLRSTD,INLRCOEF) PTS is
+
+%   2*PTNUM, including PTNUM points,
+among which ROUND(OUTLRRATIO*PTNUM)
+
+%   are outliers, others are inliers.
+
+
+%                     The inliers are
+around the line: y = INLRCOEF(1)*x + INLRCOEF(2),
+
+%   INLRSTD is the standard deviation
+of, the dist between inliers and the
+
+%         line. The outliers 
+
+ 
+
+outlrNum = round(outlrRatio*ptNum);
+
+inlrNum = ptNum-outlrNum;
+
+ 
+
+k = inlrCoef(1);
+
+b = inlrCoef(2);
+
+X = (rand(1,inlrNum)-.5)*ptNum; % X is in [-ptNum/2,ptNum/2]
+
+Y = k*X+b;
+
+ 
+
+% add noise for inliers
+
+dist = randn(1,inlrNum)*inlrStd;
+
+theta = atan(k);
+
+X = X+dist*(-sin(theta));
+
+Y = Y+dist*cos(theta);
+
+inlrs = [X;Y];
+
+ 
+
+outlrs = (rand(2,outlrNum)-.5)*ptNum;
+
+% outlrs = (rand(2,outlrNum)-[ones(1,outlrNum)*.5;ones(1,outlrNum)*.1])*ptNum;
+
+pts = [inlrs,outlrs];
+
+ 
+
+end
+
+ 
+
+ 
+
+%%randindex
+
+ 
+
+function index = randIndex(maxIndex,len)
+
+%INDEX = RANDINDEX(MAXINDEX,LEN)
+
+%   randomly, non-repeatedly select
+LEN integers from 1:MAXINDEX
+
+ 
+
+if len > maxIndex
+
+            index = [];
+
+            return
+
+end
+
+ 
+
+index = zeros(1,len);
+
+available = 1:maxIndex;
+
+rs = ceil(rand(1,len).*(maxIndex:-1:maxIndex-len+1));
+
+for p = 1:len
+
+            while rs(p) == 0
+
+                        rs(p) =
+ceil(rand(1)*(maxIndex-p+1));
+
+            end
+
+            index(p) =
+available(rs(p));
+
+            available(rs(p)) = [];
+
+end
+
+ 
+
+ 
+
+%%solvehomo
+
+ 
+
+function H = solveHomo(pts1,pts2)
+
+%         H is 3*3, H*[pts1(:,i);1] ~
+[pts2(:,i);1], H(3,3) = 1
+
+%         the solving method see
+"projective-Seitz-UWCSE.ppt"
+
+ 
+
+n = size(pts1,2);
+
+A = zeros(2*n,9);
+
+A(1:2:2*n,1:2) = pts1';
+
+A(1:2:2*n,3) = 1;
+
+A(2:2:2*n,4:5) = pts1';
+
+A(2:2:2*n,6) = 1;
+
+x1 = pts1(1,:)';
+
+y1 = pts1(2,:)';
+
+x2 = pts2(1,:)';
+
+y2 = pts2(2,:)';
+
+A(1:2:2*n,7) = -x2.*x1;
+
+A(2:2:2*n,7) = -y2.*x1;
+
+A(1:2:2*n,8) = -x2.*y1;
+
+A(2:2:2*n,8) = -y2.*y1;
+
+A(1:2:2*n,9) = -x2;
+
+A(2:2:2*n,9) = -y2;
+
+ 
+
+[evec,~] = eig(A'*A);
+
+H = reshape(evec(:,1),[3,3])';
+
+H = H/H(end); % make H(3,3) = 1
+
+ 
+
+end
+
+ 
+
+ 
+
+ 
+
+%%rgbhist
+
+function H = rgbhist(I,nBins,Nind)
+
+%% RGBHIST: color Histogram of an RGB image.
+
+%
+
+% nBins   : number of bins per EACH
+color => histogram is 'nBins^3' long.
+
+% Nind    : Normalization index
+
+%
+
+%           0 -> Un-Normalized
+historam
+
+%           1 -> l1 normalized
+
+%           2 -> l2 normalized
+
+%
+
+% H       : The vectorized histogram.
+
+%
+
+% Author  : Mopuri K Reddy, SERC,
+IISc, Bengalur, INDIA.
+
+% Date    : 25/10/2013.
+
+ 
+
+if (size(I, 3) ~= 3)
+
+    error('rgbhist:numberOfSamples',
+'Input image must be RGB.')
+
+end
+
+ 
+
+if(nargin<3)
+
+    Nind=0;
+
+    % Default is un-normalized
+histogram
+
+end
+
+H=zeros([nBins nBins nBins]);
+
+for i=1:size(I,1)
+
+    for j=1:size(I,2)
+
+        p=double(reshape(I(i,j,:),[1
+3]));
+
+        p=floor(p/(256/nBins))+1;
+
+       
+H(p(1),p(2),p(3))=H(p(1),p(2),p(3))+1;
+
+    end
+
+end
+
+ 
+
+H=H(:);
+
+% Un-Normalized histogram
+
+ 
+
+if(Nind==1)
+
+    H=H./sum(H);
+
+    % l1 normalization
+
+else if(Nind==2)
+
+        H=normc(H);
+
+        % l2 normalization
+
+    end
+
+end
+
+% We can use 'reshape' to get back to 3D histogram
+
+ 
+
+ 
+
+ 
+
+%%meanshift
+
+ 
+
+function output=mean_shift(input_image,Hs,Hr,Th)
+
+%Author  - Suraj Vantigodi, Video
+Analytics Lab, IISc Bangalore
+
+%inputs- 
+
+%Input_image- an RGB image
+
+%Hs         - spatial range to
+consider while computing mode
+
+%Hr         - RGB range 
+
+%Th         - Threshold for
+convergence
+
+%Output-
+
+%meanshift segmented or clustered image
+
+%demo output=mean_shift(input_image,40,3,3);
+
+ 
+
+input1=input_image;
+
+if (size(input1, 3) ~= 3)
+
+    error('rgbhist:numberOfSamples',
+'Input image must be RGB.')
+
+end
+
+ 
+
+input1=imresize(input1,[256,256]);
+
+input=input1;
+
+ 
+
+ 
+
+spatial_bandwidth=Hs;
+
+color_bandwidth=Hr;
+
+convergence_fact=Th;
+
+%%%%%%%%%%%%%%%%% Color Histogram %%%%%%%%%%%%%%
+
+fprintf('\n Computing Color histogram');
+
+I=input;
+
+nbins=10;
+
+ 
+
+H1=zeros([nbins nbins nbins]);
+
+ct=0;
+
+for i=1:size(I,1)
+
+    for j=1:size(I,2)
+
+        
+
+        p=double(reshape(I(i,j,:),[1
+3]));
+
+        p=floor(p/(256/nbins))+1;
+
+        ct=ct+1;
+
+        arr1(ct,:)=[p(1),p(2),p(3)];
+
+       
+H1(p(1),p(2),p(3))=H1(p(1),p(2),p(3))+1;            
+
+       
+pixels1(ct,:)=[I(i,j,:)];    
+
+    end
+
+end
+
+ 
+
+H1=H1(:);
+
+H1=H1./sum(H1);
+
+H_all=reshape(H1,[nbins,nbins,nbins]);
+
+ 
+
+%%%%%%%%%%%%%%%%%%% Histogram done %%%%%%%%%%%%%%%%%%%%
+
+ 
+
+ht=size(input,1);
+
+wd=size(input,2);
+
+output=input;
+
+fprintf('\n Starting meanshift');
+
+tic
+
+for i=1:size(input,1)
+
+    for j=1:size(input,2)
+
+    
+
+    p_y=i;
+
+    p_x=j;
+
+       
+
+    r1 = p_x - spatial_bandwidth; r2
+= p_x + spatial_bandwidth;
+
+    c1 = p_y - spatial_bandwidth; c2
+= p_y + spatial_bandwidth;
+
+    
+
+    % check boundaries of the region
+
+    if (r1<1) r1 = 1 ; end
+
+    if (c1<1) c1 = 1 ; end
+
+    if (r2>ht) r2 = ht ; end
+
+    if (c2>wd) c2 = wd ; end 
+
+    
+
+    
+
+    patch=input(r1:r2,c1:c2,:); 
+
+    
+
+    R=input(p_y,p_x,1);
+G=input(p_y,p_x,2); B=input(p_y,p_x,3);
+
+    factor=256/nbins;
+
+    bin_r=ceil(double(R)/factor);
+bin_g=ceil(double(G)/factor); bin_b=ceil(double(B)/factor);
+
+    old_bins=[bin_r bin_g
+bin_b];    
+
+           
+
+  %%%%%%%%% Meanshift part
+%%%%%%%%%%%
+
+    
+
+    dist=convergence_fact+1;
+
+    
+
+    while(dist>convergence_fact)
+
+        
+
+       
+hr=min(nbins,(bin_r+color_bandwidth));
+lr=max(1,(bin_r-color_bandwidth));
+
+       
+hg=min(nbins,(bin_g+color_bandwidth));
+lg=max(1,(bin_g-color_bandwidth));
+
+       
+hb=min(nbins,(bin_b+color_bandwidth)); lb=max(1,(bin_b-color_bandwidth));
+
+        s_r=0; s_b=0; s_g=0;
+
+        weight=0;
+
+    
+
+    for k=lr:hr
+
+        for l=lg:hg
+
+            for m=lb:hb
+
+                
+
+               
+s_r=s_r+k*H_all(k,l,m);
+
+               
+s_g=s_g+l*H_all(k,l,m);
+
+                s_b=s_b+m*H_all(k,l,m);
+
+               
+weight=weight+H_all(k,l,m);
+
+              
+
+            end
+
+        end
+
+    end
+
+        s_r=s_r/weight;
+s_g=s_g/weight; s_b=s_b/weight;
+
+        rd=(s_r-bin_r);
+gd=(s_g-bin_g); bd=(s_b-bin_b);
+
+        dist=sqrt(rd^2+gd^2+bd^2);
+
+        bin_r=round(s_r); bin_g=round(s_g);
+bin_b=round(s_b);
+
+%       dist
+
+    end
+
+   %%%%%%%%%%%%%%%%%%% meanshift done
+%%%%%%%%%%%%%%%
+
+   
+
+    color_r=bin_r*(256/nbins); %%
+computing color to be assigned
+
+    color_g=bin_g*(256/nbins);
+
+    color_b=bin_b*(256/nbins);
+
+   
+
+    output(i,j,1)=color_r;
+
+    output(i,j,2)=color_g;
+
+    output(i,j,3)=color_b;    
+
+ 
+
+    end    
+
+end
+
+fprintf('\n time taken for meanshift=%f',toc);
+
+ 
+
+%%%%%%%%%%%%%%% computing joint histogram of output %%%%%%%%
+
+fprintf('\n Computing Color histogram and plotting\n');
+
+I=output;
+
+ct=0;
+
+for i=1:size(I,1)
+
+    for j=1:size(I,2)
+
+        
+
+        p=double(reshape(I(i,j,:),[1
+3]));
+
+        p=floor(p/(256/nbins))+1;
+
+        ct=ct+1;
+
+       
+arr2(ct,:)=[p(1),p(2),p(3)];             
+
+
+        pixels2(ct,:)=I(i,j,:);
+
+    end
+
+end
+
+ 
+
+figure(1),subplot(2,2,1),imshow(input); title('input image');
+
+subplot(2,2,2),imshow(output); title('meanshift segmented image')
+
+subplot(2,2,3),plot3(pixels1(:,1),pixels1(:,2),pixels1(:,3),'o');title('color
+distribution of input image');
+
+subplot(2,2,4),plot3(pixels2(:,1),pixels2(:,2),pixels2(:,3),'o');title('color
+distribution of output');
+
+ 
+
+%链码
+
+%此函数来提取特征线链码 
+
+%im为输入图像。 
+
+%result为返回值，返回一个矩阵。矩阵的每行前两个数记录每一条特征线的起始坐标x1,y1值，终点坐标x2,y2。每行其余值记录每条特征线的链码。 
+
+%--------方向表------ 
+
+%        1 2 3 
+
+%        8   4 
+
+%        7 6 5 
+
+%-------------------- 
+
+ 
+
+function result=listcode(im) 
+
+ 
+
+im2=im; 
+
+[m n]=size(im); 
+
+count=1;      %用来记录特征线的数量 
+
+%遍历原图，搜索链码起始点 
+
+for i=1:m 
+
+    for j=1:n 
+
+        if(im2(i,j)==1) 
+
+            xy=searchtip(im2,i,j); 
+
+            [m n]=size(im2); 
+
+            x0=xy(1);   %用points记录所有链码起始点的位置 
+
+            y0=xy(2); 
+
+            next=1;    %用来判断是否结束对当前链码的搜索 
+
+            number=1;  %用来记录当前链码以搜索点的数量 
+
+            list=[]; 
+
+            list(number)=0; 
+
+            x=xy(1); 
+
+            y=xy(2); 
+
+            %每当搜索到一个起始点，搜索其周围点，追寻链码轨迹 
+
+            while(next==1) 
+
+               
+if(x<=0|x>m|y<=0|y>n)   
+%如果链码当前点已到达边界，则停止搜索 
+
+                    next=0; 
+
+                else 
+
+                    im2(x,y)=0;       %把已搜索过的点值置零，以免重复搜索 
+
+ 
+
+                    %按照方向表中从1到8的顺序检索当前点周围是否存在非0点 
+
+                    if(im2(x,y+1)==1)
+
+
+                       
+list(number)=4; 
+
+                        x=x; 
+
+                        y=y+1; 
+
+                        x1=x; 
+
+                        y1=y; 
+
+                        number=1+number; 
+
+                       
+if(x==x0&y==y0)     %判断是否回到起始点，若是则当前特征线链码提取结束 
+
+                            next=0; 
+
+                        end 
+
+                   
+elseif(im2(x+1,y)==1) 
+
+                       
+list(number)=6; 
+
+                        x=x+1; 
+
+                        y=y; 
+
+                        x1=x; 
+
+                        y1=y; 
+
+                       
+number=1+number; 
+
+                       
+if(x==x0&y==y0) 
+
+                            next=0; 
+
+                        end 
+
+                   
+elseif(im2(x,y-1)==1) 
+
+                       
+list(number)=8; 
+
+                        x=x; 
+
+                        y=y-1; 
+
+                        x1=x; 
+
+                        y1=y; 
+
+                        number=number+1; 
+
+                       
+if(x==x0&y==y0) 
+
+                            next=0; 
+
+                        end 
+
+                   
+elseif(im2(x-1,y)==1) 
+
+                       
+list(number)=2; 
+
+                        x=x-1; 
+
+                        y=y; 
+
+                        x1=x; 
+
+                        y1=y; 
+
+                       
+number=1+number; 
+
+                       
+if(x==x0&y==y0) 
+
+                            next=0; 
+
+                        end 
+
+                    elseif(im2(x+1,y+1)==1)
+
+
+                       
+list(number)=5; 
+
+                        x=x+1; 
+
+                        y=y+1; 
+
+                        x1=x; 
+
+                        y1=y; 
+
+                       
+number=1+number; 
+
+                       
+if(x==x0&y==y0) 
+
+                            next=0; 
+
+                        end 
+
+                   
+elseif(im2(x+1,y-1)==1) 
+
+                       
+list(number)=7; 
+
+                        x=x+1; 
+
+                        y=y-1; 
+
+                        x1=x; 
+
+                        y1=y; 
+
+                       
+number=1+number; 
+
+                       
+if(x==x0&y==y0) 
+
+                            next=0; 
+
+                        end 
+
+                   
+elseif(im2(x-1,y-1)==1) 
+
+                       
+list(number)=1; 
+
+                        x=x-1; 
+
+                        y=y-1; 
+
+                        x1=x; 
+
+                        y1=y; 
+
+                       
+number=1+number; 
+
+                       
+if(x==x0&y==y0) 
+
+                            next=0; 
+
+                        end 
+
+                   
+elseif(im2(x-1,y+1)==1) 
+
+                       
+list(number)=3; 
+
+                        x=x-1; 
+
+                        y=y+1; 
+
+                        x1=x; 
+
+                        y1=y; 
+
+                       
+number=1+number; 
+
+                       
+if(x==x0&y==y0) 
+
+                            next=0; 
+
+                        end 
+
+                    else 
+
+                        next=0; 
+
+                    end 
+
+                end 
+
+            end 
+
+            list1=[x0 y0 x1 y1
+list(:)']; 
+
+            [p q]=size(list1); 
+
+            list2(count,1:q)=list1; 
+
+            count=count+1; 
+
+        end 
+
+    end 
+
+end 
+
+%figure:imshow(im); 
+
+%figure:imshow(im2); 
+
+result=list2; 
+
+end
+
+ 
+
+%此程序用来从特征线上一点搜索其端点 
+
+%im2为输入图像二值图像,x0,y0为起始端点坐标 
+
+function xy=searchtip(im2,x0,y0) 
+
+im=im2; 
+
+[m n]=size(im); 
+
+xy(1)=x0; 
+
+xy(2)=y0; 
+
+next=1;    %用来判断是否结束对当前链码的搜索 
+
+x=x0; 
+
+y=y0; 
+
+%每当搜索到一个起始点，搜索其周围点，追寻链码轨迹 
+
+while(next==1) 
+
+   
+if(x<=0|x>m|y<=0|y>n) 
+  %如果链码当前点已到达边界，则停止搜索 
+
+        next=0; 
+
+    else 
+
+        im(x,y)=0;       %把已搜索过的点值置零，以免重复搜索 
+
+ 
+
+        %按照方向表中从1到8的顺序检索当前点周围是否存在非0点 
+
+        if(im(x,y+1)==1) 
+
+            x=x; 
+
+            y=y+1; 
+
+            xy(1)=x; 
+
+            xy(2)=y; 
+
+            if(x==x0&y==y0)     %判断是否回到起始点，若是则当前特征线链码提取结束 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x+1,y)==1) 
+
+            x=x+1; 
+
+            y=y; 
+
+            xy(1)=x; 
+
+            xy(2)=y; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x,y-1)==1) 
+
+            x=x; 
+
+            y=y-1; 
+
+            xy(1)=x; 
+
+            xy(2)=y; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x-1,y)==1) 
+
+            x=x-1; 
+
+            y=y; 
+
+            xy(1)=x; 
+
+            xy(2)=y; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x+1,y+1)==1) 
+
+            x=x+1; 
+
+            y=y+1; 
+
+            xy(1)=x; 
+
+            xy(2)=y; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x+1,y-1)==1) 
+
+            x=x+1; 
+
+            y=y-1; 
+
+            xy(1)=x; 
+
+            xy(2)=y; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x-1,y-1)==1) 
+
+            x=x-1; 
+
+            y=y-1; 
+
+            xy(1)=x; 
+
+            xy(2)=y; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x-1,y+1)==1) 
+
+            x=x-1; 
+
+            y=y+1; 
+
+            xy(1)=x; 
+
+            xy(2)=y; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        else 
+
+            next=0; 
+
+        end 
+
+    end 
+
+end 
+
+end
+
+ 
+
+ 
+
+%此函数用来根据一个已知点来提取以该点为端点的特征线的链码 
+
+%im为输入二值图像,x0,y0为端点坐标 
+
+function result=getcode(im,x0,y0) 
+
+[m n]=size(im); 
+
+points(1)=x0;   %用points记录所有链码起始点的位置 
+
+points(2)=y0; 
+
+next=1;    %用来判断是否结束对当前链码的搜索 
+
+number=1;  %用来记录当前链码以搜索点的数量 
+
+list=[]; 
+
+list(number)=0; 
+
+x=x0; 
+
+y=y0; 
+
+%每当搜索到一个起始点，搜索其周围点，追寻链码轨迹 
+
+while(next==1) 
+
+    if(x<=0|x>m|y<=0|y>n)    %如果链码当前点已到达边界，则停止搜索 
+
+        next=0; 
+
+    else 
+
+        im(x,y)=0;       %把已搜索过的点值置零，以免重复搜索 
+
+         
+
+        %按照方向表中从1到8的顺序检索当前点周围是否存在非0点 
+
+        if(im(x,y+1)==1) 
+
+            list(number)=4; 
+
+            x=x; 
+
+            y=y+1; 
+
+            x1=x; 
+
+            y1=y; 
+
+            number=1+number; 
+
+            if(x==x0&y==y0)     %判断是否回到起始点，若是则当前特征线链码提取结束 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x+1,y)==1) 
+
+            list(number)=6; 
+
+            x=x+1; 
+
+            y=y; 
+
+            x1=x; 
+
+            y1=y; 
+
+            number=1+number; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x,y-1)==1) 
+
+            list(number)=8; 
+
+            x=x; 
+
+            y=y-1; 
+
+            x1=x; 
+
+            y1=y; 
+
+            number=number+1; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x-1,y)==1) 
+
+            list(number)=2; 
+
+            x=x-1; 
+
+            y=y; 
+
+            x1=x; 
+
+            y1=y; 
+
+            number=1+number; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x+1,y+1)==1) 
+
+            list(number)=5; 
+
+            x=x+1; 
+
+            y=y+1; 
+
+            x1=x; 
+
+            y1=y; 
+
+            number=1+number; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x+1,y-1)==1) 
+
+            list(number)=7; 
+
+            x=x+1; 
+
+            y=y-1; 
+
+            x1=x; 
+
+            y1=y; 
+
+            number=1+number; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x-1,y-1)==1) 
+
+            list(number)=1; 
+
+            x=x-1; 
+
+            y=y-1; 
+
+            x1=x; 
+
+            y1=y; 
+
+            number=1+number; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        elseif(im(x-1,y+1)==1) 
+
+            list(number)=3; 
+
+            x=x-1; 
+
+            y=y+1; 
+
+            x1=x; 
+
+            y1=y; 
+
+            number=1+number; 
+
+            if(x==x0&y==y0) 
+
+                next=0; 
+
+            end 
+
+        else 
+
+            next=0; 
+
+        end 
+
+    end 
+
+end 
+
+result=[x0 y0 x1 y1 list(:)']; 
+
+end
+
